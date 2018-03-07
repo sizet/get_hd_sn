@@ -325,6 +325,6 @@ int main(
 
     return 0;
 FREE_HELP:
-    printf("\nget_disk_sn <hard disk device path (ex : /dev/sda)>\n\n");
+    printf("\nget_hd_sn <hard disk device path (ex : /dev/sda)>\n\n");
     return 0;
 }
