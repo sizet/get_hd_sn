@@ -1,4 +1,5 @@
 // ©
+// https://github.com/sizet/get_hd_sn
 
 #include <errno.h>
 #include <fcntl.h>
@@ -29,11 +30,11 @@
 //       <Allocation length> 的大小是 1byte, 所以直接使用最大長度 255.
 #define SCSI_SN_BUFFER_SIZE 255
 
-// 實際儲存序號的緩衝大小.
+// SCSI 部分實際儲存序號的緩衝大小.
 // 使用 SCSI_IOCTL_SEND_COMMAND 和 SG_IO 取得的序號最後並不會自動補上 '\0',
 // 所以需要多 1byte 填充 '\0',
 // 實際上傳給 <Allocation length> 的緩衝大小還是 SCSI_SN_BUFFER_SIZE.
-#define STORE_SN_BUFFER_SIZE (SCSI_SN_BUFFER_SIZE + 1)
+#define SCSI_STORE_SN_BUFFER_SIZE (SCSI_SN_BUFFER_SIZE + 1)
 
 
 
@@ -103,6 +104,9 @@ int use_hdio_get_identity(
 {
     int fret = -1, cret, disk_fd;
     struct hd_driveid disk_info;
+    // 使用 HDIO_GET_IDENTITY 取得的序號長度如果剛好等於 sizeof(disk_info.serial_no),
+    // 序號尾端不會有 '\0', 新開一個緩衝多預留空間給 '\0'.
+    char sn_buf[sizeof(disk_info.serial_no) + 1];
 
 
     disk_fd = open(hd_path, O_RDONLY);
@@ -120,7 +124,10 @@ int use_hdio_get_identity(
         goto FREE_02;
     }
 
-    DMSG("HDIO_GET_IDENTITY       : [%s]", disk_info.serial_no);
+    memset(sn_buf, 0, sizeof(sn_buf));
+    memcpy(sn_buf, disk_info.serial_no, sizeof(disk_info.serial_no));
+
+    DMSG("HDIO_GET_IDENTITY       : [%s]", sn_buf);
 
     fret = 0;
 FREE_02:
@@ -177,6 +184,7 @@ int use_scsi_ioctl_send_command(
     struct scsi_vpd_usn_info *usn_data;
     unsigned int idx;
 
+
     // SCSI 資料的緩衝,
     //
     // 在傳送 SCSI 指令時, SCSI 指令會紀錄在 (struct scsi_ioctl_cmd).data, 緩衝的內容會是 :
@@ -189,13 +197,16 @@ int use_scsi_ioctl_send_command(
     // [4byte] (struct scsi_ioctl_cmd).outlen.
     // [Nbyte] struct scsi_vpd_usn_info (回傳的序號訊息).
     unsigned char scsi_io_buf[sizeof(struct scsi_ioctl_cmd) +
-                              sizeof(struct scsi_vpd_usn_info) + STORE_SN_BUFFER_SIZE];
+                              sizeof(struct scsi_vpd_usn_info) + SCSI_STORE_SN_BUFFER_SIZE];
 
 
     // 設定參數.
     // http://sg.danny.cz/sg/p/sg_v3_ho/ch08s26.html
     scsi_io_cmd = (struct scsi_ioctl_cmd *) scsi_io_buf;
     // 要寫入的資料長度.
+    // 參考 block/scsi_ioctl.c,
+    // const unsigned char scsi_command_size_tbl[8] = {6, 10, 10, 12, 16, 12, 10, 10};
+    // INQUIRY 指令的長度是 6, 所以填 0.
     scsi_io_cmd->inlen = 0;
     // 儲存回傳的資料的緩衝大小.
     // 資料會從 scsi_io_cmd->data 開始寫入, 所以要扣掉 inlen 和 outlen 的大小.
@@ -238,7 +249,7 @@ int use_sg_io(
     char *hd_path)
 {
     int fret = -1, cret, disk_fd;
-    unsigned char usn_buf[sizeof(struct scsi_vpd_usn_info) + STORE_SN_BUFFER_SIZE];
+    unsigned char usn_buf[sizeof(struct scsi_vpd_usn_info) + SCSI_STORE_SN_BUFFER_SIZE];
     struct scsi_inquiry_info scsi_cmd;
     struct scsi_vpd_usn_info *usn_data;
     struct sg_io_hdr sg_info;
